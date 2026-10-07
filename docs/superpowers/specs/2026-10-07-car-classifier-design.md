@@ -4,6 +4,8 @@ Date: 2026-10-07
 Status: approved — pending final file review
 Scope: v1 — triplet DINOv2 open-set classifier, FastAPI backend, Next.js demo, demo + manual API keys (no Stripe).
 
+**Diagrams:** [`../diagrams/erd.md`](../../diagrams/erd.md) · [`../diagrams/flowchart.md`](../../diagrams/flowchart.md) · [`../diagrams/sequence.md`](../../diagrams/sequence.md) — kept as separate renderable files, linked here to avoid duplicating schemas. This spec is the source of truth; diagrams are derived.
+
 ## 1. Intent (agreed)
 
 - Build subscribable car-classifier: API service + website demo to try before subscribing.
