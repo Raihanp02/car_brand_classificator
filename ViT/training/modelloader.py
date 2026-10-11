@@ -3,24 +3,26 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModel, AutoImageProcessor
 
-# --------------------------------------------------------------------------
-# 4. Model: DINOv2 (with registers) backbone + projection head
-#
-# Embedding methods (must stay in sync with backend/app/embedder.py METHODS):
-#     cls_proj256       MLP-projected CLS token, dim 256 (default, trainable head)
-#     cls               raw CLS token, dim 768 (backbone fine-tune only)
-#     patch_mean        mean of patch tokens, dim 768 (backbone fine-tune only)
-#     cls_patch_concat  concat(CLS, patch_mean), dim 1536 (backbone fine-tune only)
-# --------------------------------------------------------------------------
-METHODS = {"cls_proj256": 256, "cls": 768, "patch_mean": 768, "cls_patch_concat": 1536}
+# Embedding heads live in exactly one place — backend/app/heads.py — so
+# train and serve can never disagree on method math or dims.
+try:
+    from app.heads import HEADS, METHODS
+except ImportError:  # training launched without backend/ on sys.path
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
+    from app.heads import HEADS, METHODS
 
+# --------------------------------------------------------------------------
+# 4. Model: DINOv2 (with registers) backbone + embedding head
+# --------------------------------------------------------------------------
 class DinoV2Embedder(nn.Module):
     def __init__(self, backbone_name="facebook/dinov2-with-registers-base",
                  embed_dim=256, freeze_backbone_layers=0,
                  method="cls_proj256"):
         super().__init__()
-        if method not in METHODS:
-            raise ValueError(f"unknown method {method!r}; expected one of {sorted(METHODS)}")
+        if method not in HEADS:
+            raise ValueError(f"unknown method {method!r}; expected one of {sorted(HEADS)}")
         if embed_dim != METHODS[method]:
             raise ValueError(f"embed_dim={embed_dim} incompatible with method={method!r} (dim {METHODS[method]})")
         self.method = method
@@ -36,28 +38,15 @@ class DinoV2Embedder(nn.Module):
                 for p in layer.parameters():
                     p.requires_grad = False
  
-        self.proj = nn.Sequential(
-            nn.Linear(hidden, hidden),
-            nn.GELU(),
-            nn.Linear(hidden, embed_dim),
-        ) if method == "cls_proj256" else None
+        self.proj = HEADS[method]()  # name kept as `proj` for checkpoint compat
 
     def head_parameters(self):
         """Parameters of the trainable head (empty for raw methods)."""
-        return self.proj.parameters() if self.proj is not None else []
+        return self.proj.parameters()
 
     def forward(self, pixel_values):
         out = self.backbone(pixel_values=pixel_values)
-        cls_token = out.last_hidden_state[:, 0]        # CLS embedding
-        if self.method == "cls":
-            emb = cls_token
-        elif self.method == "cls_proj256":
-            emb = self.proj(cls_token)
-        else:
-            # NOTE: mean over h[:, 1:] includes register tokens — this must
-            # match backend/app/embedder.py exactly so train/serve agree.
-            patch_mean = out.last_hidden_state[:, 1:].mean(dim=1)
-            emb = torch.cat([cls_token, patch_mean], dim=-1) if self.method == "cls_patch_concat" else patch_mean
+        emb = self.proj(out.last_hidden_state)
         emb = F.normalize(emb, dim=-1)
         return emb
  

@@ -18,11 +18,13 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from PIL import Image
+from torchvision import transforms as T
 from transformers import AutoModel
 
+from app.heads import DEFAULT_METHOD, HEADS, METHODS
+
 BACKBONE = "facebook/dinov2-with-registers-base"
-DEFAULT_METHOD = "cls_proj256"
-METHODS = {"cls_proj256": 256, "cls": 768, "patch_mean": 768, "cls_patch_concat": 1536}
+# Re-exported for api.py / eval.py / build_index.py (canonical home: app.heads).
 
 DEFAULT_INDEX = Path("models/index.faiss")
 DEFAULT_META = Path("models/index_meta.json")
@@ -39,15 +41,14 @@ class CarEmbedder(nn.Module):
         checkpoint: str | Path | None = None,
     ):
         super().__init__()
-        if method not in METHODS:
-            raise ValueError(f"unknown method {method!r}; expected one of {sorted(METHODS)}")
-        self.method, self.dim = method, METHODS[method]
+        if method not in HEADS:
+            raise ValueError(f"unknown method {method!r}; expected one of {sorted(HEADS)}")
+        self.method = method
         self.backbone = AutoModel.from_pretrained(backbone)
-        self.proj = (
-            nn.Sequential(nn.Linear(768, 768), nn.GELU(), nn.Linear(768, 256))
-            if method == "cls_proj256"
-            else None
-        )
+        self.proj = HEADS[method]()      # name kept as `proj` for checkpoint compat
+        self.dim = self.proj.dim
+        self.tf = T.Compose([T.Resize((224, 224)), T.ToTensor(),
+                             T.Normalize(_IMAGENET_MEAN, _IMAGENET_STD)])
         if checkpoint:
             self.load_state_dict(
                 torch.load(checkpoint, map_location="cpu", weights_only=True),
@@ -57,25 +58,9 @@ class CarEmbedder(nn.Module):
 
     @torch.no_grad()
     def embed_batch(self, images: list[Image.Image]) -> torch.Tensor:
-        import torchvision.transforms as T
-
-        tf = T.Compose(
-            [
-                T.Resize((224, 224)),
-                T.ToTensor(),
-                T.Normalize(_IMAGENET_MEAN, _IMAGENET_STD),
-            ]
-        )
-        x = torch.stack([tf(im.convert("RGB")) for im in images])
+        x = torch.stack([self.tf(im.convert("RGB")) for im in images])
         h = self.backbone(pixel_values=x).last_hidden_state
-        cls = h[:, 0]
-        if self.method == "cls":
-            out = cls
-        elif self.method == "cls_proj256":
-            out = self.proj(cls)
-        else:
-            mean = h[:, 1:].mean(1)
-            out = torch.cat([cls, mean], dim=-1) if self.method == "cls_patch_concat" else mean
+        out = self.proj(h)
         return out / out.norm(dim=-1, keepdim=True)
 
 
