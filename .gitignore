@@ -9,6 +9,7 @@ image_raw/
 
 # Model artifacts
 models/
+metadata.csv
 *.pt
 *.onnx
 *.faiss
