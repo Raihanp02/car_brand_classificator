@@ -34,3 +34,7 @@ web/dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Playwright
+web/test-results/
+web/playwright-report/
