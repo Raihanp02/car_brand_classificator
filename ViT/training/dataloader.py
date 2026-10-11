@@ -20,8 +20,12 @@ class VehicleDataset(Dataset):
         self.class_to_idx = {c: i for i, c in enumerate(self.classes)}
  
         self.class_to_indices = defaultdict(list)  # for PK sampler
+        # NOTE: suffix set must match the classes glob above so a webp-only
+        # class still lists samples (previously only jpg/jpeg/png matched).
         for cls in self.classes:
-            for img_path in (self.root / cls).rglob("*.[jJpP][pPnN]*[gG]"):
+            for img_path in sorted((self.root / cls).rglob("*")):
+                if not img_path.is_file() or img_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+                    continue
                 idx = len(self.samples)
                 self.samples.append((img_path, self.class_to_idx[cls]))
                 self.class_to_indices[self.class_to_idx[cls]].append(idx)
