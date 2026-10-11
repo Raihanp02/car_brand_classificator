@@ -22,6 +22,9 @@ __pycache__/
 venv/
 .env
 
+# API key database (SQLite, local secrets — never commit)
+backend/data/keys.db
+
 # Node (web/)
 web/node_modules/
 web/.next/
