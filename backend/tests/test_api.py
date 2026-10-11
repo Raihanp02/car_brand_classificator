@@ -218,6 +218,13 @@ def test_batch_too_many_413(monkeypatch, tmp_path):
     assert "detail" in r.json()
 
 
+def test_batch_empty_400(monkeypatch, tmp_path):
+    c = _mocked_client(monkeypatch, tmp_path)
+    r = c.post("/v1/predict/batch", files=[], headers={"X-API-Key": _key(c)})
+    assert r.status_code == 400
+    assert "detail" in r.json()
+
+
 def test_batch_oversize_is_per_item_error(monkeypatch, tmp_path):
     import app.api as api
 

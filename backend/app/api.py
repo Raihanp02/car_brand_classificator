@@ -304,7 +304,7 @@ async def predict(
 @app.post("/v1/predict/batch")
 async def predict_batch(
     request: Request,
-    images: list[UploadFile] = File(...),
+    images: list[UploadFile] | None = File(default=None),
     x_api_key: str | None = Header(default=None),
 ):
     t0 = time.perf_counter()
@@ -314,6 +314,9 @@ async def predict_batch(
     except HTTPException as exc:
         _logged(request, None, endpoint, exc.status_code, t0)
         raise
+    if not images:
+        _logged(request, key_id, endpoint, 400, t0)
+        raise HTTPException(status_code=400, detail="empty batch: no images")
     if len(images) > MAX_FILES:
         _logged(request, key_id, endpoint, 413, t0)
         raise HTTPException(
