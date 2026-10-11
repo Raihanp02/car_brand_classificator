@@ -68,13 +68,14 @@ class CarEmbedder(nn.Module):
         )
         x = torch.stack([tf(im.convert("RGB")) for im in images])
         h = self.backbone(pixel_values=x).last_hidden_state
-        cls, mean = h[:, 0], h[:, 1:].mean(1)
-        out = {
-            "cls": cls,
-            "patch_mean": mean,
-            "cls_patch_concat": torch.cat([cls, mean], -1),
-            "cls_proj256": self.proj(cls),
-        }[self.method]
+        cls = h[:, 0]
+        if self.method == "cls":
+            out = cls
+        elif self.method == "cls_proj256":
+            out = self.proj(cls)
+        else:
+            mean = h[:, 1:].mean(1)
+            out = torch.cat([cls, mean], dim=-1) if self.method == "cls_patch_concat" else mean
         return out / out.norm(dim=-1, keepdim=True)
 
 

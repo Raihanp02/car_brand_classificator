@@ -1,13 +1,29 @@
+import json
+
 import torch
 from torch.utils.data import DataLoader
 
 from .dataloader import VehicleDataset, PKSampler, train_transform, train_transform_alb
-from .modelloader import DinoV2Embedder, SubCenterArcFace, triplet_loss_with_stats
+from .modelloader import METHODS, DinoV2Embedder, SubCenterArcFace, triplet_loss_with_stats
+
+
+def _save_checkpoint(model, method, backbone_name, path):
+    """Save weights + a sidecar recording the embedding method.
+
+    The sidecar tells ``backend/scripts/build_index.py`` which ``--method``
+    the checkpoint was trained with, so train/serve can never disagree.
+    """
+    torch.save(model.state_dict(), path)
+    with open(str(path) + ".config.json", "w", encoding="utf-8") as f:
+        json.dump({"backbone": backbone_name, "method": method,
+                   "dim": METHODS[method]}, f, indent=2)
+
 
 def train(
     data_root="dataset/",
     backbone_name="facebook/dinov2-with-registers-base",
     embed_dim=256,
+    method="cls_proj256",
     epochs=30,
     P=8, K=4,
     lr=1e-5, head_lr=1e-3,
@@ -18,14 +34,15 @@ def train(
     ds = VehicleDataset(data_root, transform=train_transform)
     sampler = PKSampler(ds.class_to_indices, P=P, K=K, twin_groups=twin_groups)
     loader = DataLoader(ds, batch_sampler=sampler, num_workers=4, pin_memory=True)
- 
-    model = DinoV2Embedder(backbone_name, embed_dim, freeze_backbone_layers).to(device)
+
+    model = DinoV2Embedder(backbone_name, embed_dim, freeze_backbone_layers, method=method).to(device)
     criterion = SubCenterArcFace(embed_dim, num_classes=len(ds.classes)).to(device)
- 
+
     # separate LR: backbone fine-tunes slowly, new head learns fast
+    # (raw methods have no head — head_parameters() is empty then)
     optimizer = torch.optim.AdamW([
         {"params": model.backbone.parameters(), "lr": lr},
-        {"params": model.proj.parameters(), "lr": head_lr},
+        {"params": model.head_parameters(), "lr": head_lr},
         {"params": criterion.parameters(), "lr": head_lr},
     ], weight_decay=0.05)
  
@@ -53,14 +70,15 @@ def train(
         print(f"epoch {epoch+1}/{epochs}  loss={running_loss/len(loader):.4f}")
  
         if (epoch + 1) % 5 == 0:
-            torch.save(model.state_dict(), f"dinov2_embedder_epoch{epoch+1}.pt")
- 
+            _save_checkpoint(model, method, backbone_name, f"dinov2_embedder_epoch{epoch+1}.pt")
+
     return model, ds.classes
- 
+
 def train_triplet(
     data_root,
     backbone_name="facebook/dinov2-with-registers-base",
     embed_dim=256,
+    method="cls_proj256",
     epochs=20,
     P=16, K=2,
     lr=1e-5, head_lr=1e-3,
@@ -71,12 +89,12 @@ def train_triplet(
     ds = VehicleDataset(data_root, transform=train_transform)
     sampler = PKSampler(ds.class_to_indices, P=P, K=K)
     loader = DataLoader(ds, batch_sampler=sampler, num_workers=4, pin_memory=True)
- 
-    model = DinoV2Embedder(backbone_name, embed_dim, freeze_backbone_layers).to(device)
- 
+
+    model = DinoV2Embedder(backbone_name, embed_dim, freeze_backbone_layers, method=method).to(device)
+
     optimizer = torch.optim.AdamW([
         {"params": model.backbone.parameters(), "lr": lr},
-        {"params": model.proj.parameters(), "lr": head_lr},
+        {"params": model.head_parameters(), "lr": head_lr},
     ], weight_decay=0.05)
  
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs * len(loader))
@@ -115,8 +133,8 @@ def train_triplet(
         #   pairs are actually being formed (group_to_indices not degenerate).
  
         if (epoch + 1) % 5 == 0:
-            torch.save(model.state_dict(), f"dinov2_triplet_epoch{epoch+1}.pt")
- 
+            _save_checkpoint(model, method, backbone_name, f"dinov2_triplet_epoch{epoch+1}.pt")
+
     return model
 
 if __name__ == "__main__":
