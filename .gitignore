@@ -6,6 +6,8 @@ image_raw/
 *.png
 *.webp
 *.mp4
+# Demo fixtures: tiny hand-drawn car illustrations (NOT dataset photos)
+!web/public/samples/**
 
 # Model artifacts
 models/

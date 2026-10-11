@@ -31,7 +31,11 @@ export default function ResultCard({
       </div>
     );
   }
-  const pct = Math.round(item.confidence * 100);
+  // Defensive: normalize() in UploadZone guarantees finite 0–1 values, but never
+  // render NaN% if a future caller passes a raw contract value through.
+  const pct = Number.isFinite(item.confidence)
+    ? Math.round(Math.min(1, Math.max(0, item.confidence)) * 100)
+    : 0;
   return (
     <div data-testid="result-card" style={{ border: "1px solid #ccc", padding: 12 }}>
       {previewUrl ? (
@@ -58,7 +62,7 @@ export default function ResultCard({
         <ol>
           {item.top5.map((t) => (
             <li key={t.label}>
-              {t.label} — {Math.round(t.score * 100)}%
+              {t.label} — {Number.isFinite(t.score) ? Math.round(t.score * 100) : 0}%
             </li>
           ))}
         </ol>

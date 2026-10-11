@@ -32,8 +32,27 @@ async function downscale(file: File): Promise<File> {
   }
 }
 
-/** Generate 3 procedural sample-car images client-side (no binaries to commit). */
-async function makeSampleFiles(): Promise<File[]> {
+/** Bundled sample-car fixtures served from web/public/samples/. */
+const SAMPLE_URLS = [
+  "/samples/sample-car-1.jpg",
+  "/samples/sample-car-2.jpg",
+  "/samples/sample-car-3.jpg",
+];
+
+/** Load the 3 bundled sample images via fetch() → File. */
+async function loadSampleFiles(): Promise<File[]> {
+  const out: File[] = [];
+  for (let i = 0; i < SAMPLE_URLS.length; i++) {
+    const res = await fetch(SAMPLE_URLS[i]);
+    if (!res.ok) throw new Error(`Sample image ${i + 1} failed to load (${res.status})`);
+    const blob = await res.blob();
+    out.push(new File([blob], `sample-car-${i + 1}.jpg`, { type: blob.type || "image/jpeg" }));
+  }
+  return out;
+}
+
+/** Fallback only: 3 procedural canvas JPEGs when bundled samples can't load. */
+async function makeFallbackSampleFiles(): Promise<File[]> {
   const colors = ["#b03a2e", "#2874a6", "#239b56"];
   const out: File[] = [];
   for (let i = 0; i < 3; i++) {
@@ -52,6 +71,53 @@ async function makeSampleFiles(): Promise<File[]> {
     if (blob) out.push(new File([blob], `sample-car-${i + 1}.jpg`, { type: "image/jpeg" }));
   }
   return out;
+}
+
+/** Raw backend payload shapes (batch contract may drift: top5 vs top_5). */
+type RawTopEntry = { label?: unknown; score?: unknown };
+type RawBatchItem = {
+  filename?: unknown;
+  label?: unknown;
+  confidence?: unknown;
+  top5?: unknown;
+  top_5?: unknown;
+  error?: unknown;
+};
+
+function clamp01(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.min(1, Math.max(0, n));
+}
+
+function toTopEntry(raw: unknown, fallbackLabel: string): { label: string; score: number } {
+  const r = (raw ?? {}) as RawTopEntry;
+  return {
+    label: typeof r.label === "string" && r.label ? r.label : fallbackLabel,
+    score: clamp01(typeof r.score === "number" ? r.score : NaN),
+  };
+}
+
+/** Validate/normalize one batch item so a contract mismatch renders gracefully. */
+function normalizeItem(raw: unknown, index: number): BatchItem {
+  const r = (raw ?? {}) as RawBatchItem;
+  const filename =
+    typeof r.filename === "string" && r.filename ? r.filename : `image-${index + 1}`;
+  if (typeof r.error === "string" && r.error) return { filename, error: r.error };
+  const list = Array.isArray(r.top5) ? r.top5 : Array.isArray(r.top_5) ? r.top_5 : [];
+  return {
+    filename,
+    label: typeof r.label === "string" && r.label ? r.label : "Unknown",
+    confidence: clamp01(typeof r.confidence === "number" ? r.confidence : NaN),
+    top5: list.map((t, i) => toTopEntry(t, `rank-${i + 1}`)),
+  };
+}
+
+/** Validate/normalize the batch response body; null = unusable shape. */
+function normalizeResults(body: unknown): BatchItem[] | null {
+  const raw = body as { results?: unknown } | unknown[];
+  const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? raw.results : undefined;
+  if (!Array.isArray(list)) return null;
+  return list.map((item, i) => normalizeItem(item, i));
 }
 
 export default function UploadZone() {
@@ -103,8 +169,13 @@ export default function UploadZone() {
         setError(detail);
         return;
       }
-      const body = (await res.json()) as { results: BatchItem[] };
-      setResults(body.results);
+      const body: unknown = await res.json();
+      const items = normalizeResults(body);
+      if (!items) {
+        setError("Unexpected API response shape.");
+        return;
+      }
+      setResults(items);
     } catch (e) {
       setError(e instanceof Error ? `Network error: ${e.message}` : "Network error");
     } finally {
@@ -117,8 +188,12 @@ export default function UploadZone() {
   }
 
   async function onSample() {
-    const files = await makeSampleFiles();
-    await submit(files);
+    try {
+      await submit(await loadSampleFiles());
+    } catch {
+      // Bundled samples unreachable (e.g. offline preview): fall back to canvas.
+      await submit(await makeFallbackSampleFiles());
+    }
   }
 
   return (
@@ -172,11 +247,11 @@ export default function UploadZone() {
           data-testid="results-grid"
           style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}
         >
-          {results.map((item) => (
+          {results.map((item, index) => (
             <ResultCard
-              key={item.filename}
+              key={`${item.filename}-${index}`}
               item={item}
-              previewUrl={previews.find((p) => p.file.name === item.filename)?.url}
+              previewUrl={previews[index]?.url}
             />
           ))}
         </div>
