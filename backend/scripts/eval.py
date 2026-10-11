@@ -7,7 +7,7 @@ evaluating a split that is also indexed does not inflate scores.
 
 Usage (from repo root)::
 
-    uv run --project backend python backend/scripts/eval.py --split test --limit 200
+    uv run --project backend python backend/scripts/eval.py --split val --limit 200
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Eval FAISS retrieval accuracy")
     ap.add_argument("--metadata", default="metadata.csv")
     ap.add_argument("--index", default="models/index.faiss")
-    ap.add_argument("--split", default="test", choices=["train", "val", "test"])
+    ap.add_argument("--split", default="val", choices=["train", "val", "index"])
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--method", default=DEFAULT_METHOD, choices=sorted(METHODS))
     ap.add_argument("--backbone", default=BACKBONE)
@@ -79,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     top1 = topk = n = 0
+    sv_top1 = sv_topk = sv_n = 0
+    xv_top1 = xv_topk = xv_n = 0
     for i in range(0, len(queries), args.batch_size):
         batch = queries[i : i + args.batch_size]
         imgs, keep = [], []
@@ -107,11 +109,29 @@ def main(argv: list[str] | None = None) -> int:
             ][: args.k]
             if not hits:
                 continue
+            # Same-view query: another ref of the same class+view exists in
+            # the index; otherwise the query must match across views.
+            same_view = any(
+                e.get("filepath") != r["filepath"]
+                and e.get("class") == r["class"]
+                and e.get("view", "unknown") == r.get("view", "unknown")
+                for e in entries
+            )
             n += 1
-            if hits[0].get("class") == r["class"]:
+            hit1 = hits[0].get("class") == r["class"]
+            hitk = any(h.get("class") == r["class"] for h in hits)
+            if hit1:
                 top1 += 1
-            if any(h.get("class") == r["class"] for h in hits):
+            if hitk:
                 topk += 1
+            if same_view:
+                sv_n += 1
+                sv_top1 += hit1
+                sv_topk += hitk
+            else:
+                xv_n += 1
+                xv_top1 += hit1
+                xv_topk += hitk
 
     if not n:
         print("no evaluable queries", file=sys.stderr)
@@ -120,6 +140,20 @@ def main(argv: list[str] | None = None) -> int:
         f"split={args.split} n={n} top1={top1 / n:.3f} top{args.k}={topk / n:.3f}"
         f" ({top1}/{n}, {topk}/{n})"
     )
+    if sv_n:
+        print(
+            f"same_view n={sv_n} top1={sv_top1 / sv_n:.3f} top{args.k}={sv_topk / sv_n:.3f}"
+            f" ({sv_top1}/{sv_n}, {sv_topk}/{sv_n})"
+        )
+    else:
+        print("same_view n=0 (no queries with a same-view ref)")
+    if xv_n:
+        print(
+            f"cross_view n={xv_n} top1={xv_top1 / xv_n:.3f} top{args.k}={xv_topk / xv_n:.3f}"
+            f" ({xv_top1}/{xv_n}, {xv_topk}/{xv_n})"
+        )
+    else:
+        print("cross_view n=0 (every query has a same-view ref)")
     return 0
 
 

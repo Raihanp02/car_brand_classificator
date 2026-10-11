@@ -7,11 +7,14 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 
-def test_health_and_401():
-    from app.api import app
-
-    c = TestClient(app)
-    assert c.get("/health").status_code == 200
+def test_health_and_401(monkeypatch, tmp_path):
+    # Mocked client (fake index/embedder): green on a clean checkout with no
+    # gitignored models/ present. Health 200 via fakes; bare predict with no
+    # key and no file is 422 (FastAPI validation) — accepted alongside 401.
+    c = _mocked_client(monkeypatch, tmp_path)
+    r = c.get("/health")
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
     assert c.post("/v1/predict").status_code in (401, 422)  # no key / no file
 
 
@@ -297,3 +300,23 @@ def test_keyless_demo_429_with_retry_after(monkeypatch, tmp_path):
     assert r.status_code == 429
     assert "detail" in r.json()
     assert "Retry-After" in r.headers
+
+
+def test_failures_do_not_consume_quota(monkeypatch, tmp_path):
+    """Quota counts served (2xx) predictions only: a loop of corrupt files
+    must not lock the key out; two served hits then exhaust a limit of 2."""
+    import app.auth as auth
+
+    c = _mocked_client(monkeypatch, tmp_path)
+    key = auth.create_key("quota", rate_limit_per_day=2)
+    bad = {"image": ("bad.png", b"not-an-image", "image/png")}
+    for _ in range(5):
+        r = c.post("/v1/predict", files=bad, headers={"X-API-Key": key})
+        assert r.status_code == 400
+    good = {"image": ("a.png", _png(), "image/png")}
+    headers = {"X-API-Key": key}
+    assert c.post("/v1/predict", files=good, headers=headers).status_code == 200
+    assert c.post("/v1/predict", files=good, headers=headers).status_code == 200
+    r = c.post("/v1/predict", files=good, headers=headers)
+    assert r.status_code == 429
+    assert "detail" in r.json()

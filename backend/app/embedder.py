@@ -39,7 +39,8 @@ class CarEmbedder(nn.Module):
         checkpoint: str | Path | None = None,
     ):
         super().__init__()
-        assert method in METHODS, f"unknown method {method}"
+        if method not in METHODS:
+            raise ValueError(f"unknown method {method!r}; expected one of {sorted(METHODS)}")
         self.method, self.dim = method, METHODS[method]
         self.backbone = AutoModel.from_pretrained(backbone)
         self.proj = (
@@ -49,7 +50,8 @@ class CarEmbedder(nn.Module):
         )
         if checkpoint:
             self.load_state_dict(
-                torch.load(checkpoint, map_location="cpu"), strict=False
+                torch.load(checkpoint, map_location="cpu", weights_only=True),
+                strict=False,
             )
         self.eval()
 
@@ -154,7 +156,11 @@ def search_index(emb, k: int = 5, index=None, meta: dict | None = None) -> list:
     for qi in range(q.shape[0]):
         hits = []
         for rank, (idx, s) in enumerate(zip(ids[qi], scores[qi])):
-            e = dict(entries[idx]) if 0 <= idx < len(entries) else {}
+            # Skip phantom hits: FAISS returns idx=-1 (and no entry) when
+            # k > ntotal. They carry no "class" and must never be votable.
+            if not 0 <= idx < len(entries):
+                continue
+            e = dict(entries[idx])
             e.update({"rank": rank + 1, "score": float(s)})
             hits.append(e)
         out.append(hits)

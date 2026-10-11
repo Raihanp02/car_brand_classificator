@@ -19,7 +19,6 @@ the whole batch.
 from __future__ import annotations
 
 import io
-import json
 import logging
 import os
 import time
@@ -33,13 +32,14 @@ from PIL import Image
 from pydantic import BaseModel
 
 from app.auth import create_key, key_daily_usage, key_rate_limit, log_usage, validate_key
-from app.embedder import search_index
+from app.embedder import DEFAULT_METHOD, METHODS, search_index
 
 log = logging.getLogger("car_classifier")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INDEX_PATH = REPO_ROOT / "models" / "index.faiss"
 META_PATH = REPO_ROOT / "models" / "index_meta.json"
+CHECKPOINT_PATH = REPO_ROOT / "models" / "dino_triplet.pt"
 
 MODEL_VERSION = "registers-base_triplet_v1"
 MAX_FILES = 10
@@ -69,8 +69,33 @@ def _demo_limit_per_day() -> int:
         return 20
 
 
+def _resolve_embed_cfg() -> tuple[str, int, Path | None]:
+    """Single MODEL/CHECKPOINT resolution (embedder side, env override allowed).
+
+    Method from ``MODEL`` (else ``CAR_METHOD``, else ``cls_proj256``); dim from
+    ``METHODS[method]`` (same pattern as ``eval.py --method``). Checkpoint from
+    ``CHECKPOINT`` env, else ``models/dino_triplet.pt`` when present, else None
+    (clean absence keeps the random-projection baseline behavior).
+    """
+    method = os.environ.get("MODEL", os.environ.get("CAR_METHOD", DEFAULT_METHOD))
+    if method not in METHODS:
+        raise ValueError(f"unknown method {method!r}; expected one of {sorted(METHODS)}")
+    dim = METHODS[method]
+    ckpt_env = os.environ.get("CHECKPOINT")
+    if ckpt_env:
+        checkpoint: Path | None = Path(ckpt_env)
+    else:
+        checkpoint = CHECKPOINT_PATH if CHECKPOINT_PATH.exists() else None
+    return method, dim, checkpoint
+
+
 def get_index() -> tuple[Any, dict]:
-    """Return cached ``(faiss_index, meta)``, loading once from repo-root models/."""
+    """Return cached ``(faiss_index, meta)``, loading once from repo-root models/.
+
+    Expected method/dim come from the embedder-side resolution
+    (:func:`_resolve_embed_cfg`), never from the sidecar under test, so a
+    method/dim mismatch refuses instead of comparing the index to itself.
+    """
     if _INDEX.get("ready"):
         return _INDEX["index"], _INDEX["meta"]
     if _INDEX.get("error"):
@@ -78,16 +103,11 @@ def get_index() -> tuple[Any, dict]:
     try:
         from app.embedder import load_index
 
-        if not META_PATH.exists():
-            raise FileNotFoundError(
-                f"index meta {META_PATH} missing;"
-                " build one with backend/scripts/build_index.py"
-            )
-        sidecar = json.loads(META_PATH.read_text())
+        expected_method, expected_dim, _ = _resolve_embed_cfg()
         index, meta = load_index(
             INDEX_PATH,
-            expected_method=sidecar["method"],
-            expected_dim=sidecar["dim"],
+            expected_method=expected_method,
+            expected_dim=expected_dim,
         )
         if index.ntotal == 0:
             raise ValueError("index is empty; run backend/scripts/build_index.py")
@@ -99,13 +119,15 @@ def get_index() -> tuple[Any, dict]:
 
 
 def get_embedder() -> Any:
-    """Return the cached ``CarEmbedder`` matching the index method (lazy: loads weights)."""
+    """Return the cached ``CarEmbedder`` (lazy: loads trained weights when present)."""
     if _EMBEDDER.get("ready"):
         return _EMBEDDER["embedder"]
     from app.embedder import CarEmbedder
 
-    _, meta = get_index()
-    embedder = CarEmbedder(method=meta.get("method", "cls_proj256"))
+    method, dim, checkpoint = _resolve_embed_cfg()
+    get_index()  # validates method/dim against the sidecar BEFORE weights load
+    embedder = CarEmbedder(method=method, checkpoint=checkpoint)
+    log.info("embedder loaded: method=%s dim=%d checkpoint=%s", method, dim, checkpoint)
     _EMBEDDER.update({"embedder": embedder, "ready": True})
     return embedder
 
@@ -177,14 +199,21 @@ def _decode_image(data: bytes, filename: str) -> Image.Image:
 
 
 def _vote(hits: list[dict]) -> tuple[str, float, list[dict]]:
-    """kNN majority vote (ties -> best rank) -> (label, confidence, top5)."""
+    """kNN majority vote (ties -> best rank) -> (label, confidence, top5).
+
+    Hits lacking ``"class"`` (phantom FAISS rows, e.g. idx -1 when k>ntotal)
+    are filtered before voting so an empty-string class can never win.
+    """
+    valid = [h for h in hits if h.get("class")]
+    if not valid:
+        raise RuntimeError("FAISS returned no valid neighbours; rebuild the index")
     top5 = [
         {"label": h.get("class", ""), "score": float(h.get("score", 0.0))}
-        for h in hits
+        for h in valid
     ]
-    counts = Counter(h.get("class", "") for h in hits)
+    counts = Counter(h.get("class", "") for h in valid)
     best_rank_score: dict[str, float] = {}
-    for h in hits:  # hits arrive rank-sorted; first occurrence = best rank
+    for h in valid:  # hits arrive rank-sorted; first occurrence = best rank
         best_rank_score.setdefault(h.get("class", ""), float(h.get("score", 0.0)))
     label = max(counts, key=lambda c: (counts[c], best_rank_score[c]))
     return label, best_rank_score[label], top5
@@ -225,6 +254,15 @@ def _logged(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        method, dim, checkpoint = _resolve_embed_cfg()
+    except ValueError as exc:
+        log.warning("embed config invalid (endpoints will 500): %s", exc)
+    else:
+        log.info(
+            "startup embed config: method=%s dim=%d checkpoint=%s",
+            method, dim, checkpoint,
+        )
     try:  # preload index + meta ONCE at startup; endpoints 500 if this failed
         get_index()
     except RuntimeError as exc:

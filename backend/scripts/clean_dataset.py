@@ -30,12 +30,12 @@ def infer_view_and_class(relpath: str) -> tuple[str, str]:
 
 
 def assign_split(sha1: str) -> str:
-    """Deterministic 80/10/10 train/val/test split from the file hash."""
+    """Deterministic 80/10/10 train/val/index split from the file hash."""
     bucket = int(sha1[:8], 16) % 10
     if bucket == 8:
         return "val"
     if bucket == 9:
-        return "test"
+        return "index"
     return "train"
 
 
@@ -136,7 +136,12 @@ def sha1_of(path: Path) -> str | None:
 
 
 def collect_rows(root: Path) -> list[dict]:
-    """Scan *root* and return one metadata row per image file."""
+    """Scan *root* and return one metadata row per image file.
+
+    Rows with a duplicate sha1 (CCTV copies across views/classes) are dropped,
+    keeping the first occurrence; the dropped count is logged. ``sha1`` is
+    still recorded on every kept row.
+    """
     try:
         anchor = root.parent
         prefix = root.name
@@ -144,6 +149,8 @@ def collect_rows(root: Path) -> list[dict]:
         anchor = Path(".")
         prefix = root.name
     rows: list[dict] = []
+    seen: set[str] = set()
+    dropped = 0
     for path in sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES):
         try:
             rel = path.relative_to(anchor)
@@ -152,6 +159,11 @@ def collect_rows(root: Path) -> list[dict]:
         relpath = rel.as_posix()
         cls, view = infer_view_and_class(relpath)
         digest = sha1_of(path)
+        if digest is not None:
+            if digest in seen:
+                dropped += 1
+                continue
+            seen.add(digest)
         width, height = image_dimensions(path)
         corrupt = 0 if digest is not None and width is not None else 1
         rows.append(
@@ -166,6 +178,8 @@ def collect_rows(root: Path) -> list[dict]:
                 "corrupt": corrupt,
             }
         )
+    if dropped:
+        print(f"dedupe: dropped {dropped} duplicate-sha1 rows (kept first)")
     return rows
 
 

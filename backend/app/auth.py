@@ -112,11 +112,16 @@ def revoke_key(raw: str) -> bool:
 
 
 def key_daily_usage(key_id: int, day_iso: str) -> int:
-    """Count usage_logs rows for ``key_id`` with ``ts >= day_iso``."""
+    """Count SERVED predictions (2xx) for ``key_id`` with ``ts >= day_iso``.
+
+    Failed attempts (4xx/5xx) are logged but never consume quota.
+    """
     con = _db()
     try:
         row = con.execute(
-            "SELECT COUNT(*) FROM usage_logs WHERE key_id = ? AND ts >= ?",
+            "SELECT COUNT(*) FROM usage_logs"
+            " WHERE key_id = ? AND ts >= ?"
+            " AND status_code BETWEEN 200 AND 299",
             (key_id, day_iso),
         ).fetchone()
         return int(row[0]) if row else 0
