@@ -120,31 +120,4 @@ def train_triplet(
     return model
 
 if __name__ == "__main__":
-    # example: declare known badge-twin groups by class index after ds is built,
-    # or pass class NAMES and resolve to indices before calling train().
-    # twin_groups = [[class_to_idx["toyota_avanza_g3"], class_to_idx["daihatsu_xenia_g3"]], ...]
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dataset_path = r"C:\Users\AQI\JOB\pakuwon\image_raw\car_brands"
-
-    dataset = VehicleDataset(dataset_path, transform=train_transform_alb)
-    sampler = PKSampler(dataset.class_to_indices, P=4, K=4)
-    dataloader = DataLoader(dataset, batch_sampler=sampler, num_workers=4, pin_memory=True)
-
-    model = DinoV2Embedder(backbone_name="facebook/dinov2-with-registers-base", 
-                           embed_dim, 
-                           freeze_backbone_layers=6).to(device)
-
-    lr = 1e-5
-    head_lr = 1e-3
-    optimizer = torch.optim.AdamW([
-            {"params": model.backbone.parameters(), "lr": lr},
-            {"params": model.proj.parameters(), "lr": head_lr},
-        ], weight_decay=0.05)
-
-
-
-    model, classes = train(
-        data_root="dataset/",
-        backbone_name="facebook/dinov2-with-registers-base",
-        freeze_backbone_layers=6,   # unfreeze more (e.g. 0-2) once loss plateaus
-    )
+    model, classes = train(data_root=r"C:\Users\AQI\learning\car_classificator\car_brands", freeze_backbone_layers=6)

@@ -16,7 +16,7 @@ class VehicleDataset(Dataset):
         self.root = Path(root)
         self.transform = transform
         self.samples = []       # list[(path, label_idx)]
-        self.classes = sorted([str(d.relative_to(self.root).parent) for d in self.root.rglob("*.[jJpP][pPnN]*[gG]")])
+        self.classes = sorted({p.parent.name if (p.parent.parent == self.root) else p.relative_to(self.root).parts[0] for p in self.root.rglob("*") if p.suffix.lower() in {".jpg",".jpeg",".png",".webp"}})
         self.class_to_idx = {c: i for i, c in enumerate(self.classes)}
  
         self.class_to_indices = defaultdict(list)  # for PK sampler
@@ -43,11 +43,14 @@ class VehicleDataset(Dataset):
 #    the same batch (see `twin_groups` below).
 # --------------------------------------------------------------------------
 class PKSampler(Sampler):
-    def __init__(self, group_to_indices, P=16, K=2, iterations=300):
+    def __init__(self, group_to_indices, P=16, K=2, iterations=300, twin_groups=None):
         self.group_to_indices = {g: idx for g, idx in group_to_indices.items() if len(idx) >= K}
+        dropped = [g for g, idx in group_to_indices.items() if len(idx) < K]
+        if dropped: print(f"PKSampler: dropping {len(dropped)} groups with <K={K} shots (kept in index, excluded from train)")
         self.groups = list(self.group_to_indices.keys())
         self.P, self.K = P, K
         self.iterations = iterations
+        self.twin_groups = twin_groups
  
     def __iter__(self):
         for _ in range(self.iterations):
