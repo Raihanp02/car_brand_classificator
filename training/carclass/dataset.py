@@ -98,7 +98,7 @@ train_transform_alb = A.Compose([
     A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=30, val_shift_limit=20, p=0.7),
     A.CLAHE(clip_limit=2.0, p=0.3),
     A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
-    A.ImageCompression(quality_lower=40, quality_upper=90, p=0.3),  # simulate CCTV codec artifacts
+    A.ImageCompression(quality_range=(40, 90), p=0.3),  # simulate CCTV codec artifacts
     A.GaussianBlur(blur_limit=(3, 5), p=0.2),
     A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ToTensorV2(),

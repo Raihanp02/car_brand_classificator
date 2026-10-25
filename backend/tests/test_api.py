@@ -3,13 +3,15 @@
 import io
 import sqlite3
 
+import numpy as np
+
 from fastapi.testclient import TestClient
 from PIL import Image
 
 
 def test_health_and_401(monkeypatch, tmp_path):
     # Mocked client (fake index/embedder): green on a clean checkout with no
-    # gitignored models/ present. Health 200 via fakes; bare predict with no
+    # gitignored artifacts/ present. Health 200 via fakes; bare predict with no
     # key and no file is 422 (FastAPI validation) — accepted alongside 401.
     c = _mocked_client(monkeypatch, tmp_path)
     r = c.get("/health")
@@ -55,11 +57,9 @@ class _FakeEmbedder:
         self.calls: list[int] = []
 
     def embed_batch(self, images):
-        import torch
-
         self.calls.append(len(images))
         n = len(images)
-        return torch.ones((n, 256), dtype=torch.float32) / 16.0
+        return np.ones((n, 256), dtype=np.float32) / 16.0
 
 
 def _fake_search(emb, k=5, index=None, meta=None):
@@ -72,22 +72,29 @@ def _fake_search(emb, k=5, index=None, meta=None):
 
 def _mocked_client(monkeypatch, tmp_path):
     """TestClient with tmp keys.db, fake index/embedder/search (no weights)."""
-    import app.api as api
-    import app.auth as auth
+    from types import SimpleNamespace
+
+    import app.main as api
+    import app.auth.store as auth
+    from app.services import predictor, registry
 
     monkeypatch.setattr(auth, "DB_PATH", tmp_path / "keys.db")
     api.reset_state()
     fake_emb = _FakeEmbedder()
-    monkeypatch.setattr(api, "get_index", lambda: (_FakeIndex(), FAKE_META))
-    monkeypatch.setattr(api, "get_embedder", lambda: fake_emb)
-    monkeypatch.setattr(api, "search_index", _fake_search)
+    contract = SimpleNamespace(
+        model_version="registers-base_triplet_v1", method="cls_proj256", dim=256
+    )
+    monkeypatch.setattr(registry, "get_contract", lambda: contract)
+    monkeypatch.setattr(registry, "get_index", lambda: (_FakeIndex(), FAKE_META))
+    monkeypatch.setattr(registry, "get_embedder", lambda: fake_emb)
+    monkeypatch.setattr(predictor, "search_index", _fake_search)
     client = TestClient(api.app)
     client.fake_emb = fake_emb  # type: ignore[attr-defined]
     return client
 
 
 def _key(client, name="t"):
-    import app.auth as auth
+    import app.auth.store as auth
 
     return auth.create_key(name)
 
@@ -112,7 +119,7 @@ def test_predict_ok_shape_and_logs_usage(monkeypatch, tmp_path):
     assert isinstance(body["latency_ms"], int)
     assert c.fake_emb.calls == [1]  # single goes through batch-of-1
 
-    import app.auth as auth
+    import app.auth.store as auth
 
     con = sqlite3.connect(str(auth.DB_PATH))
     row = con.execute(
@@ -141,7 +148,7 @@ def test_predict_bad_key_401(monkeypatch, tmp_path):
 
 
 def test_predict_revoked_key_401(monkeypatch, tmp_path):
-    import app.auth as auth
+    import app.auth.store as auth
 
     c = _mocked_client(monkeypatch, tmp_path)
     key = _key(c)
@@ -166,10 +173,10 @@ def test_predict_corrupt_400(monkeypatch, tmp_path):
 
 
 def test_predict_oversize_413(monkeypatch, tmp_path):
-    import app.api as api
+    import app.main as api
 
     c = _mocked_client(monkeypatch, tmp_path)
-    monkeypatch.setattr(api, "MAX_BYTES", 10)
+    monkeypatch.setattr(api.config, "MAX_BYTES", 10)
     r = c.post(
         "/v1/predict",
         files={"image": ("a.png", _png(), "image/png")},
@@ -229,10 +236,10 @@ def test_batch_empty_400(monkeypatch, tmp_path):
 
 
 def test_batch_oversize_is_per_item_error(monkeypatch, tmp_path):
-    import app.api as api
+    import app.main as api
 
     c = _mocked_client(monkeypatch, tmp_path)
-    monkeypatch.setattr(api, "MAX_BYTES", 10)
+    monkeypatch.setattr(api.config, "MAX_BYTES", 10)
     files = [("images", ("big.png", _png(), "image/png"))]
     r = c.post("/v1/predict/batch", files=files, headers={"X-API-Key": _key(c)})
     assert r.status_code == 200, r.text
@@ -305,7 +312,7 @@ def test_keyless_demo_429_with_retry_after(monkeypatch, tmp_path):
 def test_failures_do_not_consume_quota(monkeypatch, tmp_path):
     """Quota counts served (2xx) predictions only: a loop of corrupt files
     must not lock the key out; two served hits then exhaust a limit of 2."""
-    import app.auth as auth
+    import app.auth.store as auth
 
     c = _mocked_client(monkeypatch, tmp_path)
     key = auth.create_key("quota", rate_limit_per_day=2)

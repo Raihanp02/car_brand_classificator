@@ -3,14 +3,14 @@ import json
 import torch
 from torch.utils.data import DataLoader
 
-from .dataloader import VehicleDataset, PKSampler, train_transform, train_transform_alb
-from .modelloader import METHODS, DinoV2Embedder, SubCenterArcFace, triplet_loss_with_stats
+from carclass.dataset import VehicleDataset, PKSampler, train_transform, train_transform_alb
+from carclass.model import METHODS, DinoV2Embedder, SubCenterArcFace, triplet_loss_with_stats
 
 
 def _save_checkpoint(model, method, backbone_name, path):
     """Save weights + a sidecar recording the embedding method.
 
-    The sidecar tells ``backend/scripts/build_index.py`` which ``--method``
+    The sidecar tells ``carclass.build_index`` which ``--method``
     the checkpoint was trained with, so train/serve can never disagree.
     """
     torch.save(model.state_dict(), path)

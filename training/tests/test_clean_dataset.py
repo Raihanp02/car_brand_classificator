@@ -1,4 +1,4 @@
-from scripts.clean_dataset import infer_view_and_class
+from carclass.clean_dataset import infer_view_and_class
 
 
 def test_infer_view_and_class():

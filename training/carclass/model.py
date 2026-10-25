@@ -3,15 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModel, AutoImageProcessor
 
-# Embedding heads live in exactly one place — backend/app/heads.py — so
-# train and serve can never disagree on method math or dims.
-try:
-    from app.heads import HEADS, METHODS
-except ImportError:  # training launched without backend/ on sys.path
-    import sys
-    from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
-    from app.heads import HEADS, METHODS
+# Embedding heads live in exactly one place inside this repo; the serving
+# repo reads the method/dim from the exported model contract instead.
+from carclass.heads import HEADS, METHODS
 
 # --------------------------------------------------------------------------
 # 4. Model: DINOv2 (with registers) backbone + embedding head

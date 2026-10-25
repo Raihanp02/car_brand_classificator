@@ -1,6 +1,6 @@
 """Dataset normalizer for the car classifier.
 
-Walks ``car_brands/<class>[/<view>]/*.jpg`` and produces a ``metadata.csv``
+Walks ``data/car_brands/<class>[/<view>]/*.jpg`` and produces ``data/metadata.csv``
 with header::
 
     filepath,class,view,split,sha1,width,height,corrupt
@@ -198,8 +198,8 @@ def print_summary(rows: list[dict]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Normalize car_brands/ into metadata.csv")
-    parser.add_argument("--root", default="car_brands")
-    parser.add_argument("--out", default="metadata.csv")
+    parser.add_argument("--root", default="data/car_brands")
+    parser.add_argument("--out", default="data/metadata.csv")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 

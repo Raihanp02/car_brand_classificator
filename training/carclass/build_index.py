@@ -1,16 +1,16 @@
 """Build the FAISS search index from metadata.csv rows.
 
 Embeds all valid (corrupt == 0) rows in batches of 32 with
-:class:`app.embedder.CarEmbedder` (L2-normalized), stores them in a
-``faiss.IndexFlatIP`` index, and writes ``models/index.faiss`` plus the
-``models/index_meta.json`` sidecar::
+:class:`carclass.embedder.CarEmbedder` (L2-normalized), stores them in a
+``faiss.IndexFlatIP`` index, and writes ``artifacts/index.faiss`` plus the
+``artifacts/index_meta.json`` sidecar::
 
     {"version": 1, "backbone": ..., "method": "cls_proj256", "dim": 256,
      "entries": [{"filepath": ..., "class": ..., "view": ..., "split": ...}]}
 
 Usage (from repo root)::
 
-    uv run --project backend python backend/scripts/build_index.py --limit 20
+    uv run python -m carclass.build_index --limit 20
 """
 
 from __future__ import annotations
@@ -21,12 +21,7 @@ import json
 import sys
 from pathlib import Path
 
-THIS_DIR = Path(__file__).resolve().parent
-BACKEND_DIR = THIS_DIR.parent
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
-
-REPO_ROOT = BACKEND_DIR.parent
+from carclass.paths import REPO_ROOT, dataset_path
 
 
 def resolve_metadata(path: str) -> Path:
@@ -40,11 +35,11 @@ def resolve_metadata(path: str) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from app.embedder import BACKBONE, DEFAULT_METHOD, METHODS, CarEmbedder
+    from carclass.embedder import BACKBONE, DEFAULT_METHOD, METHODS, CarEmbedder
 
     ap = argparse.ArgumentParser(description="Build FAISS index from metadata.csv")
-    ap.add_argument("--metadata", default="metadata.csv")
-    ap.add_argument("--out-dir", default="models")
+    ap.add_argument("--metadata", default="data/metadata.csv")
+    ap.add_argument("--out-dir", default="artifacts")
     ap.add_argument("--method", default=DEFAULT_METHOD, choices=sorted(METHODS))
     ap.add_argument("--backbone", default=BACKBONE)
     ap.add_argument("--checkpoint", default=None)
@@ -84,9 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         batch = valid[i : i + args.batch_size]
         imgs, keep = [], []
         for r in batch:
-            fp = Path(r["filepath"])
-            if not fp.is_absolute():
-                fp = REPO_ROOT / fp
+            fp = dataset_path(r["filepath"])
             if not fp.exists():
                 missing += 1
                 continue

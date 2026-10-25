@@ -21,13 +21,13 @@ from PIL import Image
 from torchvision import transforms as T
 from transformers import AutoModel
 
-from app.heads import DEFAULT_METHOD, HEADS, METHODS
+from carclass.heads import DEFAULT_METHOD, HEADS, METHODS
 
 BACKBONE = "facebook/dinov2-with-registers-base"
-# Re-exported for api.py / eval.py / build_index.py (canonical home: app.heads).
+# Re-exported for eval.py / build_index.py (canonical home: carclass.heads).
 
-DEFAULT_INDEX = Path("models/index.faiss")
-DEFAULT_META = Path("models/index_meta.json")
+DEFAULT_INDEX = Path("artifacts/index.faiss")
+DEFAULT_META = Path("artifacts/index_meta.json")
 
 _IMAGENET_MEAN = [0.485, 0.456, 0.406]
 _IMAGENET_STD = [0.229, 0.224, 0.225]
@@ -120,7 +120,7 @@ def search_index(emb, k: int = 5, index=None, meta: dict | None = None) -> list:
         if not DEFAULT_META.exists():
             raise FileNotFoundError(
                 f"no index passed and default sidecar {DEFAULT_META} missing;"
-                " build one with backend/scripts/build_index.py"
+                " build one with: python -m carclass.build_index"
             )
         sidecar = json.loads(DEFAULT_META.read_text())
         index, meta = load_index(

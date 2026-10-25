@@ -1,13 +1,13 @@
 """Retrieval eval for the FAISS index (car-classifier v1).
 
 Embeds query rows from one metadata split, searches the on-disk index with
-:meth:`app.embedder.search_index`, and reports top-1 / top-5 same-class
+:meth:`carclass.embedder.search_index`, and reports top-1 / top-5 same-class
 accuracy. Hits on the query's own filepath are skipped (leave-one-out), so
 evaluating a split that is also indexed does not inflate scores.
 
 Usage (from repo root)::
 
-    uv run --project backend python backend/scripts/eval.py --split val --limit 200
+    uv run python -m carclass.eval --split val --limit 200
 """
 
 from __future__ import annotations
@@ -17,16 +17,11 @@ import csv
 import sys
 from pathlib import Path
 
-THIS_DIR = Path(__file__).resolve().parent
-BACKEND_DIR = THIS_DIR.parent
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
-
-REPO_ROOT = BACKEND_DIR.parent
+from carclass.paths import REPO_ROOT, dataset_path
 
 
 def main(argv: list[str] | None = None) -> int:
-    from app.embedder import (
+    from carclass.embedder import (
         BACKBONE,
         DEFAULT_METHOD,
         METHODS,
@@ -35,8 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     ap = argparse.ArgumentParser(description="Eval FAISS retrieval accuracy")
-    ap.add_argument("--metadata", default="metadata.csv")
-    ap.add_argument("--index", default="models/index.faiss")
+    ap.add_argument("--metadata", default="data/metadata.csv")
+    ap.add_argument("--index", default="artifacts/index.faiss")
     ap.add_argument("--split", default="val", choices=["train", "val", "index"])
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--method", default=DEFAULT_METHOD, choices=sorted(METHODS))
@@ -85,9 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         batch = queries[i : i + args.batch_size]
         imgs, keep = [], []
         for r in batch:
-            fp = Path(r["filepath"])
-            if not fp.is_absolute():
-                fp = REPO_ROOT / fp
+            fp = dataset_path(r["filepath"])
             if not fp.exists():
                 continue
             try:

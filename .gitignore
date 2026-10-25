@@ -9,7 +9,8 @@ image_raw/
 # Demo fixtures: tiny hand-drawn car illustrations (NOT dataset photos)
 !web/public/samples/**
 
-# Model artifacts
+# Model artifacts (training/ publishes into backend/artifacts)
+backend/artifacts/
 models/
 metadata.csv
 *.pt

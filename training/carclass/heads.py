@@ -4,8 +4,8 @@ Single source of truth for how an embedding is derived from DINOv2 hidden
 states ``h: (B, 1+N, hidden)``. Both sides of the train/serve contract use
 this module:
 
-- training: ``ViT/training/modelloader.py::DinoV2Embedder``
-- serving: ``backend/app/embedder.py::CarEmbedder``
+- training: ``carclass/model.py`` and ``carclass/embedder.py``
+- serving: ``backend/app/ml/onnx_embedder.py`` (ONNX only, no torch)
 
 ``METHODS`` is derived from each head's ``dim`` so the dims cannot drift
 from the implementations. ``ClsProj256Head`` subclasses ``nn.Sequential``

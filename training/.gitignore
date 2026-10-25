@@ -1,0 +1,23 @@
+# Dataset — large, local only
+data/car_brands/
+data/image_raw/
+data/*.csv
+
+# Model artifacts (copy into ../backend/artifacts when publishing)
+artifacts/
+*.pt
+*.onnx
+*.faiss
+car_embedding_db/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

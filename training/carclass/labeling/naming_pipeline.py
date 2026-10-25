@@ -1,13 +1,13 @@
-import cv2
 import os
-from prompt_mapping import prompt_list, class_mapping
-import torch
 from pathlib import Path
 from uuid import uuid4
-from brand_classifier import SigLipImageClassifier
-from vision_transformers import SigLipTransformers
-from script.ViT.naming_pipeline import BrandClassifierAnnotator
-from pathlib import Path
+
+import cv2
+import torch
+
+from carclass.labeling.brand_classifier import SigLipImageClassifier
+from carclass.labeling.prompt_mapping import class_mapping, prompt_list
+from carclass.labeling.vision_transformers import SigLipTransformers
 
 class BrandClassifierAnnotator:
     def __init__(self, image_folder, new_directory, brand_classifier, batch_size=16, text_prompts=prompt_list, class_mapping=class_mapping):
@@ -61,8 +61,8 @@ if __name__ == "__main__":
     brand_classifier = SigLipImageClassifier(model=brand_classifier_model)
 
     BASE_DIR = Path(__file__).resolve().parents[2]
-    image_folder = BASE_DIR / "image_raw" / "classify" / "dataset3" / "raw"
-    new_directory = BASE_DIR / "image_raw" / "classify" / "dataset3" / "classified"
+    image_folder = BASE_DIR / "data" / "image_raw" / "classify" / "dataset3" / "raw"
+    new_directory = BASE_DIR / "data" / "image_raw" / "classify" / "dataset3" / "classified"
     brand_annotator = BrandClassifierAnnotator(image_folder=image_folder, new_directory="renamed", brand_classifier=brand_classifier)
 
     brand_annotator.process()

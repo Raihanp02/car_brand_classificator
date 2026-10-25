@@ -18,8 +18,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = REPO_ROOT / "backend" / "data" / "keys.db"
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+DB_PATH = BACKEND_DIR / "data" / "keys.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS api_keys(
