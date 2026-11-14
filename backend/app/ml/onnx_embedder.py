@@ -17,8 +17,8 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from app.ml.contract import ModelContract
-
+from app.ml.contract import ModelContract, verify_model_file
+from config import settings
 
 def preprocess_image(image: Image.Image, preprocessing: dict[str, Any]) -> np.ndarray:
     """Contract-defined preprocessing: RGB -> resize -> scale -> normalize -> CHW."""
@@ -38,9 +38,11 @@ class OnnxEmbedder:
         model_path: str | Path,
         contract: ModelContract,
         providers: list[str] | None = None,
+        batch_size: int = 16,
     ):
         import onnxruntime as ort
 
+        self.batch_size = batch_size if batch_size else settings.BATCH_SIZE
         self.contract = contract
         self.dim = contract.dim
         self.session = ort.InferenceSession(
@@ -53,13 +55,46 @@ class OnnxEmbedder:
 
         self._preprocessing: dict[str, Any] = contract.preprocessing
 
+    @classmethod
+    def load(
+        cls,
+        model_path: str | Path,
+        contract: ModelContract,
+        providers: list[str] | None = None,
+    ) -> "OnnxEmbedder":
+        """Verify the file against the contract, load it, and sanity-check output."""
+        verify_model_file(model_path, contract)        # sha256 pin
+        emb = cls(model_path, contract, providers)
+
+        probe = Image.new("RGB", (64, 64))             # dummy image, also warms up the session
+        out = emb.embed_batch([probe])
+        if out.shape != (1, contract.dim):
+            raise ValueError(
+                f"embedder output {out.shape} disagrees with contract dim={contract.dim}"
+            )
+        return emb
+
     def preprocess(self, image: Image.Image) -> np.ndarray:
         return preprocess_image(image, self._preprocessing)
 
-    def embed_batch(self, images: list[Image.Image]) -> np.ndarray:
-        batch = np.stack([self.preprocess(im) for im in images]).astype(np.float32)
-        out = np.asarray(
-            self.session.run(None, {self.input_name: batch})[0], dtype=np.float32
-        )
+    def embed_batch(
+        self,
+        images: list[Image.Image],
+        batch_size: int | None = None,
+    ) -> np.ndarray:
+        batch_size = batch_size or self.batch_size  # e.g. set in __init__, default 32
+        if not images:
+            return np.empty((0, self.embed_dim), dtype=np.float32)
+
+        outputs = []
+        for start in range(0, len(images), batch_size):
+            chunk = images[start : start + batch_size]
+            batch = np.stack([self.preprocess(im) for im in chunk]).astype(np.float32)
+            out = np.asarray(
+                self.session.run(None, {self.input_name: batch})[0], dtype=np.float32
+            )
+            outputs.append(out)
+
+        out = np.concatenate(outputs, axis=0)
         norm = np.linalg.norm(out, axis=-1, keepdims=True)
         return out / np.maximum(norm, 1e-12)
